@@ -2,16 +2,11 @@
 
 ## Setup (Mac instructions)
 
-1. Install [ollama](https://ollama.com/) and run `ollama pull llama3.2:3b` to download the LLM.
-2. Clone this repository and install the rest of the dependencies with 
-```
-conda create -n zerebro python=3.10
-conda activate zerebro
-pip install -r requirements.txt
-```
-3. Run `./run-voicechat2.sh` to start the required servers. This will run each of the three servers in different tmux sessions.
-4. Access the voice chat at `http://localhost:8000`
-5. Set `DEBUG=False` in [`voicechat2.py`](ui/index2.html#L215) to disable the debug UI (this will remove the latency metrics).
+1. Install [ollama](https://ollama.com/) (it is an app) and run `ollama pull llama3.2:3b` in the terminal to download the LLM. Ensure that ollama is running (you can check this by seeing if the app icon is visible in the Mac menu bar).
+2. Clone this repository: In your terminal, run `git clone https://github.com/estaudere/zerebro-s2s.git`. Then *navigate* into the respository that was just copied onto your computer by running `cd zerebro-s2s`.
+3. Install the rest of the dependencies with `./install.sh`.
+4. Run `./run-voicechat2.sh` to start the required servers. This will run each of the three servers in different tmux sessions.
+5. Access the voice chat at `http://localhost:8000`
 
 ## Interaction
 

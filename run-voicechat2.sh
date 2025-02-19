@@ -22,16 +22,16 @@ create_window() {
 tmux new-session -d -s voicechat2
 
 # FastAPI server (with Mamba activation)
-create_window "voicechat2" "conda activate voicechat && uvicorn voicechat2:app --host localhost --port 8000 --reload"
+create_window "voicechat2" "micromamba run -r voicechat uvicorn voicechat2:app --host localhost --port 8000 --reload"
 
 # SRT server (HF transformers w/ distil-whisper)
-create_window "srt" "conda activate voicechat && uvicorn srt-server:app --host 0.0.0.0 --port 8001 --reload"
+create_window "srt" "micromamba run -r voicechat uvicorn srt-server:app --host 0.0.0.0 --port 8001 --reload"
 
 # # LLM server (llama.cpp)
 # create_window "llm" "llama.cpp/llama-server --host 127.0.0.1 --port 8002 -m $LLM_MODEL -ngl 99 -c $LLM_CONTEXT"
 
 # TTS server (with Mamba activation)
-create_window "tts" "conda activate voicechat && uvicorn tts-server:app --host 0.0.0.0 --port 8003"
+create_window "tts" "micromamba run -r voicechat uvicorn tts-server:app --host 0.0.0.0 --port 8003"
 
 # Attach to the session
 tmux attach-session -t voicechat2
