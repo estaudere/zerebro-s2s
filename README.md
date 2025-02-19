@@ -4,7 +4,8 @@
 
 1. Install [ollama](https://ollama.com/) and run `ollama pull llama3.2:3b` to download the LLM.
 2. Clone this repository and install the rest of the dependencies with 
-```conda create -n zerebro python=3.10
+```
+conda create -n zerebro python=3.10
 conda activate zerebro
 pip install -r requirements.txt
 ```
