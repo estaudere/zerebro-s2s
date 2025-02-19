@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>voicechat2</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/symbl-opus-encdec@0.1.2/src/recorder.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js"></script>
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #000;
+            color: #888;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            padding: 2rem;
+            height: 100vh;
+            position: relative;
+        }
+
+        /* Control elements */
+        .controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 20px;
+        }
+
+        .control-circle {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #444;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        #vadToggle.active {
+            background: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        #recordIndicator.recording {
+            background: #ff0000;
+            box-shadow: 0 0 10px #ff0000;
+        }
+
+        /* Audio visualizer */
+        .visualizer-container {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            /* transform: translateY(-50%); */
+            width: 30px;
+            height: 200px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .visualizer-block {
+            width: 100%;
+            height: 8px;
+            background: #222;
+            transition: background 0.1s ease;
+        }
+
+        .visualizer-block.active {
+            background: #00ff00;
+        }
+
+        /* Conversation display */
+        #conversationLog {
+            max-width: 800px;
+            margin: 0 auto;
+            height: calc(100vh - 100px);
+            overflow-y: auto;
+            padding: 2rem;
+            scrollbar-width: thin;
+            scrollbar-color: #333 #000;
+        }
+
+        #conversationLog::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #conversationLog::-webkit-scrollbar-track {
+            background: #000;
+        }
+
+        #conversationLog::-webkit-scrollbar-thumb {
+            background: #333;
+        }
+
+        .user-message {
+            color: #666;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            opacity: 0.8;
+        }
+
+        .ai-message {
+            color: #00ff00;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            position: relative;
+        }
+
+        @keyframes decryptText {
+            0% { color: #666; }
+            100% { color: #00ff00; }
+        }
+
+        .ai-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 1.2em;
+            background: #00ff00;
+            margin-left: 4px;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* Hide debug elements */
+        #timer, #latencyMetrics, #status, #logArea {
+            display: none;
+        }
+
+        /* New debug metrics style */
+        #latencyMetrics {
+            display: none;  /* Hidden by default */
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border: 1px solid #333;
+            font-family: 'Courier New', monospace;
+            font-size: 0.7rem;
+            color: #666;
+            max-width: 200px;
+        }
+
+        #latencyMetrics.show {
+            display: block;
+        }
+
+        #latencyMetrics table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        #latencyMetrics td {
+            padding: 2px 4px;
+            border: none;
+        }
+
+        #latencyMetrics td:first-child {
+            text-align: right;
+        }
+
+        #latencyMetrics td:last-child {
+            text-align: left;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <div id="vadToggle" class="control-circle"></div>
+            <div id="recordIndicator" class="control-circle"></div>
+        </div>
+
+        <div class="visualizer-container">
+            <!-- Will be populated by JavaScript -->
+        </div>
+
+        <div id="conversationLog"></div>
+
+        <!-- Hidden elements for functionality -->
+        <div id="timer">00:00:000</div>
+        <div id="latencyMetrics">
+            <table>
+                <tr><td>V2V:</td><td id="totalVoiceToVoice">0</td><td>ms</td></tr>
+                <tr><td>SRT:</td><td id="srtDuration">0</td><td>ms</td></tr>
+                <tr><td>TTFT:</td><td id="llmTTFT">0</td><td>ms</td></tr>
+                <tr><td>TTFS:</td><td id="llmTTFS">0</td><td>ms</td></tr>
+                <tr><td>TTS:</td><td id="ttsDuration">0</td><td>ms</td></tr>
+            </table>
+        </div>
+        <div id="status">Ready</div>
+        <div id="logArea"></div>
+    </div>
+
+    <script>
+        // Add this at the top of the script section
+        const DEBUG = true; // Set this to false to hide debug info
+
+        // First, modify the block creation code at the start of the script
+        const visualizerContainer = document.querySelector('.visualizer-container');
+        // Create blocks in reverse order (19 to 0)
+        for (let i = 19; i >= 0; i--) {
+            const block = document.createElement('div');
+            block.className = 'visualizer-block';
+            visualizerContainer.appendChild(block);
+        }
+
+        // Elements to update
+        const vadToggle = document.getElementById('vadToggle');
+        const recordIndicator = document.getElementById('recordIndicator');
+        const status = document.getElementById('status');
+        const logArea = document.getElementById('logArea');
+        const timerDisplay = document.getElementById('timer');
+
+        // Network
+        let startTime;
+        let socket;
+        let isProcessing = false;
+        let latencyIntervalId = null;
+        let ping = null;
+
+        // Recording
+        let isRecording = false;
+        let recordingStartTime;
+        let recorder;
+        let timerInterval;
+        let audioChunks = [];
+
+        // VAD
+        let isVADEnabled = false;
+        let myvad;
+
+        // Text 
+        let currentAIResponse = '';
+        let aiMessageElement = null;
+        let isAIResponding = false;
+
+        // Playback
+        let audioQueue = [];
+        let isPlaying = false;
+
+        // Ping every second
+        function startLatencyMeasurement() {
+            if (latencyIntervalId === null) {
+                latencyIntervalId = setInterval(measureLatency, 1000);
+            }
+        }
+
+        function stopLatencyMeasurement() {
+            if (latencyIntervalId !== null) {
+                clearInterval(latencyIntervalId);
+                latencyIntervalId = null;
+            }
+        }
+
+        function measureLatency() {
+            if (!isProcessing) {
+                ping = performance.now();
+                socket.send(JSON.stringify({ type: 'ping' }));
+            }
+        }
+
+        function updateLatencyDisplay(latency) {
+          const latencyElement = document.getElementById('networkLatency');
+          if (latencyElement) {
+            latencyElement.textContent = `${latency.toFixed(2)}ms`;
+          }
+        }
+
+        // VAD
+        vadToggle.addEventListener('click', toggleVAD);
+        async function toggleVAD() {
+            if (isVADEnabled) {
+                isVADEnabled = false;
+                vadToggle.classList.remove('active');
+                vadToggle.style.background = '';
+                vadToggle.style.color = '';
+                if (myvad) {
+                    await myvad.pause();
+                    // myvad = null;
+                }
+                updateStatus('VAD disabled');
+            } else {
+                isVADEnabled = true;
+                vadToggle.classList.add('active');
+                vadToggle.style.background = 'red';
+                vadToggle.style.color = 'white';
+                initializeVAD();
+                updateStatus('VAD enabled');
+            }
+        }
+        async function startVAD() {
+            if(isVADEnabled) {
+                if (myvad) {
+                    await myvad.start();
+                }
+                updateStatus('VAD enabled');
+            }
+        }
+        async function pauseVAD() {
+            if(isVADEnabled) {
+                if (myvad) {
+                    await myvad.pause();
+                }
+                updateStatus('VAD paused');
+            }
+        }
+
+        function ensureWebSocketOpen() {
+          return new Promise((resolve) => {
+            if (socket.readyState === WebSocket.OPEN) {
+              resolve();
+            } else {
+              socket.addEventListener('open', () => resolve(), { once: true });
+            }
+          });
+        }
+
+
+        // START monkeypatch
+        Recorder.prototype.encodeAudio = function(audioFloat32Array) {
+          return new Promise((resolve, reject) => {
+            // Store the original callbacks
+            const originalOndataavailable = this.ondataavailable;
+            const originalOnstart = this.onstart;
+            const originalOnstop = this.onstop;
+
+            let encodedChunks = [];
+
+            this.ondataavailable = (typedArray) => {
+              encodedChunks.push(typedArray);
+            };
+
+            this.onstart = () => {
+              // When recording starts, send the audio data to the encoder
+              if (this.encoder && this.encoder.postMessage) {
+                this.encoder.postMessage({
+                  command: 'encode',
+                  buffers: [audioFloat32Array]
+                });
+              }
+            };
+
+            this.onstop = () => {
+              // Combine all chunks into a single Blob
+              const opusBlob = new Blob(encodedChunks, { type: 'audio/ogg; codecs=opus' });
+              
+              // Restore original callbacks
+              this.ondataavailable = originalOndataavailable;
+              this.onstart = originalOnstart;
+              this.onstop = originalOnstop;
+
+              resolve(opusBlob);
+            };
+
+            // Start and immediately stop the recorder to trigger the encoding process
+            this.start().then(() => {
+              this.stop();
+            }).catch(reject);
+          });
+        };
+        // END monkeypatch
+
+
+        async function initializeVAD() {
+            try {
+                if(!myvad) {
+                    myvad = await vad.MicVAD.new({
+                        onSpeechStart: () => {
+                            // Add this to show recording indicator when speech starts
+                            document.getElementById('recordIndicator').classList.add('recording');
+                        },
+                        onSpeechEnd: async(audio) => {
+                            // Remove recording indicator when speech ends
+                            document.getElementById('recordIndicator').classList.remove('recording');
+                            
+                            let opusBlob;
+                            console.log('Speech ended, audio length:', audio.length);
+                            clearInterval(timerInterval);
+
+                            try {
+                                opusBlob = await recorder.encodeAudio(audio);
+                                console.log("Encoding complete, blob size:", opusBlob.size);
+                                
+                                // Ensure WebSocket is open, reinitialize if necessary
+                                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                                    log('WebSocket is not open. Reinitializing...');
+                                    try {
+                                        await initializeWebSocketAsync();
+                                    } catch (error) {
+                                        log(`Error reinitializing WebSocket: ${error.message}`);
+                                        return;
+                                    }
+                                }
+
+                                if (socket && socket.readyState === WebSocket.OPEN) {
+                                    log(`Sending audio file: ${opusBlob.size} bytes`);
+                                    socket.send(opusBlob);
+                                    log('Audio file sent successfully');
+                                    // Send stop_recording message
+                                    socket.send(JSON.stringify({ action: "stop_recording" }));
+                                    log('Sent stop_recording message');
+                                } else {
+                                    log('WebSocket is not open. Cannot send audio.');
+                                }
+                            } catch (error) {
+                                console.error('Error encoding audio:', error);
+                            }
+                        },
+                        onVADMisfire: () => {
+                            // Add this to ensure recording indicator is removed on misfire
+                            document.getElementById('recordIndicator').classList.remove('recording');
+                            log('VAD misfire detected');
+                        }
+                    });
+                }
+                await myvad.start();
+                updateStatus('VAD initialized and started');
+
+            } catch (error) {
+                console.error('Error initializing VAD:', error);
+                updateStatus('Error initializing VAD');
+            }
+        }
+
+        function updateStatus(message) {
+            status.textContent = message;
+        }
+
+
+        function startRecording() {
+            if (!isRecording) {
+                stopLatencyMeasurement();
+
+                // Clear the previous AI response when starting a new recording
+                currentAIResponse = '';
+                aiMessageElement = null;
+                isAIResponding = false;
+
+                isRecording = true;
+                recordingStartTime = Date.now();
+                updateTimerDisplay();
+                audioChunks = [];
+                recorder.start();
+                document.getElementById('status').textContent = 'Recording...';
+                document.getElementById('recordIndicator').classList.add('recording');
+            }
+        }
+
+        async function stopRecording() {
+            if (isRecording) {
+                isRecording = false;
+                try {
+                    await recorder.stop();
+                    log('Recording stopped successfully');
+                    document.getElementById('status').textContent = 'Processing...';
+                    recordingEndTime = Date.now();
+
+                    // Ensure WebSocket is open, reinitialize if necessary
+                    if (!socket || socket.readyState !== WebSocket.OPEN) {
+                        log('WebSocket is not open. Reinitializing...');
+                        try {
+                            await initializeWebSocketAsync();
+                        } catch (error) {
+                            log(`Error reinitializing WebSocket: ${error.message}`);
+                            return;
+                        }
+                    }
+
+                    // Create blob from accumulated chunks and send
+                    const blob = new Blob(audioChunks, { 'type' : 'audio/ogg; codecs=opus' });
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        log(`Sending audio file: ${blob.size} bytes`);
+                        socket.send(blob);
+                        // Send stop_recording message to server
+                        const stopMessage = JSON.stringify({ action: "stop_recording" });
+                        log(`Sending stop_recording message: ${stopMessage}`);
+                        socket.send(stopMessage);
+                    } else {
+                        log('WebSocket is not open. Cannot send audio.');
+                    }
+                } catch (error) {
+                    log(`Error stopping recording: ${error.message}`);
+                }
+                document.getElementById('recordIndicator').classList.remove('recording');
+            }
+        }
+
+        function updateTimerDisplay() {
+            if (isRecording) {
+                const elapsed = Date.now() - recordingStartTime;
+                const minutes = Math.floor(elapsed / 60000);
+                const seconds = Math.floor((elapsed % 60000) / 1000);
+                const milliseconds = elapsed % 1000;
+                timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${milliseconds.toString().padStart(3, '0')}`;
+                requestAnimationFrame(updateTimerDisplay);
+            }
+        }
+
+        // Add event listeners for the record indicator circle instead
+        recordIndicator.addEventListener('mousedown', startRecording);
+        recordIndicator.addEventListener('mouseup', stopRecording);
+        recordIndicator.addEventListener('mouseleave', stopRecording);
+
+        // Keep the existing spacebar event listeners
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space' && !isRecording) {
+                event.preventDefault(); // Prevent scrolling
+                startRecording();
+            }
+        });
+
+        document.addEventListener('keyup', (event) => {
+            if (event.code === 'Space') {
+                event.preventDefault();
+                stopRecording();
+            }
+        });
+
+        // Touch event listeners for mobile devices
+        recordIndicator.addEventListener('touchstart', (event) => {
+            event.preventDefault();
+            startRecording();
+        });
+
+        recordIndicator.addEventListener('touchend', (event) => {
+            event.preventDefault();
+            stopRecording();
+        });
+
+        function playNextAudio() {
+            if(!isPlaying) {
+                startVAD();
+            }
+
+            if (audioQueue.length === 0 || isPlaying) {
+                return;
+            }
+
+            isPlaying = true;
+            pauseVAD();
+
+            const audioBlob = audioQueue.shift();
+            const audio = new Audio(URL.createObjectURL(audioBlob));
+
+            audio.onended = () => {
+                isPlaying = false;
+                playNextAudio(); // Play the next audio in the queue
+            };
+
+            audio.onerror = (error) => {
+                log(`Error playing audio: ${error.message}`);
+                isPlaying = false;
+                playNextAudio(); // Try to play the next audio in case of an error
+            };
+
+            audio.play().catch((error) => {
+                log(`Error starting audio playback: ${error.message}`);
+                isPlaying = false;
+                playNextAudio(); // Try to play the next audio in case of an error
+            });
+        }
+
+        function queueAudioForPlayback(audioBlob) {
+            audioQueue.push(audioBlob);
+            playNextAudio(); // Try to play if not already playing
+        }
+
+        function log(message) {
+            const timestamp = new Date().toISOString();
+            logArea.innerHTML = `${timestamp} - ${message}<br>` + logArea.innerHTML;
+        }
+
+        function updateTimer() {
+            const elapsed = Date.now() - startTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            const milliseconds = elapsed % 1000;
+            timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${milliseconds.toString().padStart(3, '0')}`;
+        }
+
+        let audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        let analyzerNode;
+
+        async function createSourceNode() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const sourceNode = audioContext.createMediaStreamSource(stream);
+                
+                // Create and connect analyzer node here
+                analyzerNode = audioContext.createAnalyser();
+                analyzerNode.fftSize = 64;
+                sourceNode.connect(analyzerNode);
+                
+                return sourceNode;
+            } catch {
+                // If we don't resample then recording will be 48K, 4x too slow...
+                recordIndicator.style.display = 'None';
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const sourceNode = audioContext.createMediaStreamSource(stream);
+                
+                // Create and connect analyzer node here too
+                analyzerNode = audioContext.createAnalyser();
+                analyzerNode.fftSize = 64;
+                sourceNode.connect(analyzerNode);
+                
+                return sourceNode;
+            }
+        }
+
+        async function initializeRecorder() {
+            const sourceNode = await createSourceNode();
+            const config = {
+                numberOfChannels: 1,
+                encoderSampleRate: 16000,
+                encoderFrameSize: 20,
+                maxFramesPerPage: 40,
+                encoderComplexity: 6,
+                encoderApplication: 2048, // Voice
+                originalSampleRate: 16000,
+                streamPages: true,
+                sourceNode: sourceNode
+            };
+
+            recorder = new Recorder(config);
+            log('Recorder initialized, object:', recorder);
+
+            recorder.ondataavailable = (typedArray) => {
+                log(`Data available: ${typedArray.length} bytes`);
+                audioChunks.push(typedArray);
+            };
+
+            recorder.onstart = () => {
+                log('Recording started');
+                status.textContent = 'Recording...';
+                startTime = Date.now();
+                timerInterval = setInterval(updateTimer, 10);
+            };
+
+            recorder.onstop = () => {
+                log('Recording stopped');
+                status.textContent = 'Processing...';
+                clearInterval(timerInterval);
+            };
+        }
+
+        function playAudio(audioBlob) {
+            const audio = new Audio(URL.createObjectURL(audioBlob));
+            audio.play();
+        }
+
+
+    function initializeWebSocketAsync() {
+        return new Promise((resolve, reject) => {
+            
+        let currentUrl = window.location;
+        let wsProtocol = currentUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+        let wsUrl = `${wsProtocol}//${currentUrl.host}/ws`;
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = () => {
+                log('WebSocket connected');
+                status.textContent = 'Ready';
+                recordIndicator.disabled = false;
+                startLatencyMeasurement();
+                resolve(socket);
+        };
+
+        socket.onclose = (event) => {
+                log(`WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+                status.textContent = 'Disconnected';
+                recordIndicator.disabled = true;
+                stopLatencyMeasurement();
+                reject(new Error('WebSocket closed'));
+        };
+
+        socket.onerror = (error) => {
+                log(`WebSocket error: ${error.message}`);
+                status.textContent = 'Error';
+                reject(error);
+        };
+
+            socket.onmessage = (event) => {
+                log(`Received message from server: ${typeof event.data}`);
+                if (event.data instanceof Blob) {
+                    // Handle audio data
+                    queueAudioForPlayback(event.data);
+                } else {
+                    // Handle JSON messages
+                    try {
+                        const message = JSON.parse(event.data);
+
+                        // Don't spam logs...
+                        if (message.type !== 'pong') {
+                            log(`Parsed server message: ${JSON.stringify(message)}`);
+                        }
+
+                        if (message.type === 'pong') {
+                            const latency = performance.now() - ping;
+                            updateLatencyDisplay(latency);
+                        } else if (message.type === 'text') {
+                            // Handle streamed text from LLM
+                            if (message.content) {
+                                updateAIResponse(message.content);
+                            }
+                        } else if (message.type === 'transcription') {
+                            // Handle transcribed user input
+                            displayMessage('User', message.content);
+                            // Reset AI response for new turn
+                            currentAIResponse = '';
+                            aiMessageElement = null;
+                            isAIResponding = true;
+                        } else if (message.type === 'first_audio_response') {
+                            firstResponseTime = Date.now();
+                        } else if (message.type === 'latency_metrics') {
+                            updateLatencyMetrics(message.metrics);
+                        } else if (message.type === 'processing_complete') {
+                            status.textContent = 'Ready';
+                            isProcessing = false;
+                            startLatencyMeasurement();
+                            isAIResponding = false;
+                            // Remove the cursor
+                            if (aiMessageElement) {
+                                const cursor = aiMessageElement.querySelector('.ai-cursor');
+                                if (cursor) cursor.remove();
+                            }
+                        } else if (message.type === 'error') {
+                            log(`Error from server: ${message.message}`);
+                            status.textContent = 'Error';
+                        }
+                    } catch (error) {
+                        log(`Error parsing server message: ${error.message}`);
+                    }
+                }
+            };
+        });
+    }
+
+
+
+        function updateLatencyMetrics(metrics) {
+            if (!DEBUG) return;
+            
+            document.getElementById("totalVoiceToVoice").textContent = `${(metrics.total_voice_to_voice * 1000).toFixed(1)}`;
+            document.getElementById("srtDuration").textContent = `${(metrics.srt_duration * 1000).toFixed(1)}`;
+            document.getElementById("llmTTFT").textContent = `${(metrics.llm_ttft * 1000).toFixed(1)}`;
+            document.getElementById("llmTTFS").textContent = `${(metrics.llm_ttfs * 1000).toFixed(1)}`;
+            document.getElementById("ttsDuration").textContent = `${(metrics.tts_duration * 1000).toFixed(1)}`;
+        }
+
+
+        function displayMessage(role, content) {
+            const conversationLog = document.getElementById('conversationLog');
+            const messageElement = document.createElement('p');
+            messageElement.className = role.toLowerCase() + '-message';
+            
+            if (role === 'AI') {
+                messageElement.style.animation = 'decryptText 0.5s forwards';
+            }
+            
+            // Remove the role prefix from the displayed message
+            messageElement.textContent = content;
+            conversationLog.appendChild(messageElement);
+            conversationLog.scrollTop = conversationLog.scrollHeight;
+            return messageElement;
+        }
+
+        function updateAIResponse(newContent) {
+            currentAIResponse += newContent;
+            if (!aiMessageElement) {
+                aiMessageElement = displayMessage('AI', '');
+            }
+            // Remove the "AI: " prefix since we're using styling to differentiate speakers
+            aiMessageElement.innerHTML = `${currentAIResponse}${isAIResponding ? '<span class="ai-cursor"></span>' : ''}`;
+            const conversationLog = document.getElementById('conversationLog');
+            conversationLog.scrollTop = conversationLog.scrollHeight;
+        }
+
+
+        let recordingEndTime;
+        let firstResponseTime;
+        
+        // Audio visualization
+        async function setupAudioVisualization() {
+            const blocks = document.querySelectorAll('.visualizer-block');
+            const dataArray = new Uint8Array(analyzerNode.frequencyBinCount);
+
+            function updateVisualizer() {
+                analyzerNode.getByteFrequencyData(dataArray);
+                
+                // Process frequency bands from bottom to top
+                for (let i = 0; i < blocks.length; i++) {
+                    // Reverse the index to map bottom frequencies to bottom blocks
+                    const value = dataArray[blocks.length - 1 - i];
+                    const block = blocks[i];
+                    if (value > 128) {
+                        block.classList.add('active');
+                    } else {
+                        block.classList.remove('active');
+                    }
+                }
+                
+                requestAnimationFrame(updateVisualizer);
+            }
+
+            updateVisualizer();
+        }
+
+        // Keep only this onload function
+        window.onload = async () => {
+            // Show debug elements if DEBUG is true
+            if (DEBUG) {
+                document.getElementById('latencyMetrics').classList.add('show');
+            }
+
+            await initializeRecorder();
+            await recorder.initialize;
+            await setupAudioVisualization();
+            console.log('Recorder object:', recorder);
+            console.log('Encoder object:', recorder.encoder);
+
+            try {
+                await initializeWebSocketAsync();
+                log('Application initialized');
+            } catch (error) {
+                log(`Error initializing application: ${error.message}`);
+            }
+        };
+    </script>
+</body>
+</html>
