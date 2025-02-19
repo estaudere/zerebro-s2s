@@ -8,6 +8,8 @@
 4. Run `./run-voicechat2.sh` to start the required servers. This will run each of the three servers in different tmux sessions.
 5. Access the voice chat at `http://localhost:8000`
 
+NOTE: If you want to reinstall the code after changes have been made, you will need to delete the folder `zerebro-s2s` (which you can probably find at ~/) and follow the instructions above again.
+
 ## Interaction
 
 1. Press and hold the space bar or the right circle in the top right of the UI to talk (let go to stop).
