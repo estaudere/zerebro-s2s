@@ -119,6 +119,10 @@
             position: relative;
         }
 
+        .ai-message-text {
+            color: #00ff00;
+        }
+
         @keyframes decryptText {
             0% { color: #666; }
             100% { color: #00ff00; }
@@ -180,6 +184,96 @@
             text-align: left;
             color: #888;
         }
+
+        .loading-indicator {
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            animation: loadingBlink 1s infinite;
+        }
+
+        @keyframes loadingBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .music-player {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 20px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            text-align: center;
+            min-width: 300px;
+        }
+
+        .artist {
+            color: #666;
+        }
+
+        .music-controls {
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 5px;
+        }
+
+        .skip-button {
+            background: none;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        .skip-button:hover {
+            background: #00ff00;
+            color: black;
+        }
+
+        .now-playing {
+            color: #00ff00;
+            font-size: 1.2rem;
+            margin-bottom: 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .progress-container {
+            width: 100%;
+            height: 4px;
+            background: #333;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: #00ff00;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+
+        .progress-hover {
+            position: absolute;
+            top: -20px;
+            background: #00ff00;
+            color: black;
+            padding: 2px 4px;
+            border-radius: 2px;
+            font-size: 0.8rem;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -208,6 +302,20 @@
         </div>
         <div id="status">Ready</div>
         <div id="logArea"></div>
+        <div id="vadStatusMessage" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); color: #666; font-size: 1.2rem; opacity: 0.7;">
+            Press and hold spacebar to speak
+        </div>
+
+        <div class="music-player">
+            <div class="music-controls">
+                <div class="now-playing">Loading music...</div>
+                <button class="skip-button">▶︎▶︎</button>
+            </div>
+            <div class="progress-container">
+                <div class="progress-bar"></div>
+                <div class="progress-hover"></div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -257,6 +365,16 @@
         let audioQueue = [];
         let isPlaying = false;
 
+        // Music player
+        let currentAudio = new Audio();
+        let playlist = [];
+        let currentTrackIndex = -1;
+        let isMusicPlaying = false;
+        let musicVolume = 0.2;
+        let fadeInterval;
+        let musicTimeout = null;
+        const MUSIC_TIMEOUT_DURATION = 20000; // 20 seconds in milliseconds
+
         // Ping every second
         function startLatencyMeasurement() {
             if (latencyIntervalId === null) {
@@ -298,6 +416,7 @@
                     // myvad = null;
                 }
                 updateStatus('VAD disabled');
+                document.getElementById('vadStatusMessage').textContent = 'Automatic voice detection on';
             } else {
                 isVADEnabled = true;
                 vadToggle.classList.add('active');
@@ -305,6 +424,7 @@
                 vadToggle.style.color = 'white';
                 initializeVAD();
                 updateStatus('VAD enabled');
+                document.getElementById('vadStatusMessage').textContent = 'Press and hold spacebar to speak';
             }
         }
         async function startVAD() {
@@ -384,6 +504,12 @@
             try {
                 if(!myvad) {
                     myvad = await vad.MicVAD.new({
+                        minSpeechEnergy: 0.50,  // Increase this to require louder speech (0-1.0)
+                        maxSilenceEnergy: 0.20,  // Increase this to be more tolerant of background noise
+                        minPeakEnergy: 0.3,     // Minimum peak energy to trigger speech
+                        silenceTimeoutMs: 200,   // How long to wait before stopping after silence
+                        redemptionFrames: 8,     // How many frames to wait before confirming speech ended
+                        
                         onSpeechStart: () => {
                             // Add this to show recording indicator when speech starts
                             document.getElementById('recordIndicator').classList.add('recording');
@@ -448,6 +574,10 @@
 
         function startRecording() {
             if (!isRecording) {
+                if (isMusicPlaying) {
+                    fadeMusic(0);
+                }
+                clearMusicTimeout(); // Clear any existing timeout
                 stopLatencyMeasurement();
 
                 // Clear the previous AI response when starting a new recording
@@ -473,6 +603,9 @@
                     log('Recording stopped successfully');
                     document.getElementById('status').textContent = 'Processing...';
                     recordingEndTime = Date.now();
+
+                    // Don't start music immediately after recording
+                    clearMusicTimeout();
 
                     // Ensure WebSocket is open, reinitialize if necessary
                     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -547,11 +680,15 @@
         });
 
         function playNextAudio() {
-            if(!isPlaying) {
+            if (!isPlaying) {
                 startVAD();
             }
 
             if (audioQueue.length === 0 || isPlaying) {
+                if (audioQueue.length === 0) {
+                    // Start music timeout when AI finishes talking
+                    startMusicTimeout();
+                }
                 return;
             }
 
@@ -702,7 +839,11 @@
             socket.onmessage = (event) => {
                 log(`Received message from server: ${typeof event.data}`);
                 if (event.data instanceof Blob) {
-                    // Handle audio data
+                    // Stop music when AI starts talking
+                    if (isMusicPlaying) {
+                        fadeMusic(0);
+                    }
+                    clearMusicTimeout(); // Clear any existing timeout
                     queueAudioForPlayback(event.data);
                 } else {
                     // Handle JSON messages
@@ -729,6 +870,9 @@
                             currentAIResponse = '';
                             aiMessageElement = null;
                             isAIResponding = true;
+                            isProcessing = true;  // Set this to true when processing starts
+                            // Create loading indicator
+                            aiMessageElement = displayMessage('AI', '');
                         } else if (message.type === 'first_audio_response') {
                             firstResponseTime = Date.now();
                         } else if (message.type === 'latency_metrics') {
@@ -743,6 +887,8 @@
                                 const cursor = aiMessageElement.querySelector('.ai-cursor');
                                 if (cursor) cursor.remove();
                             }
+                            // Start music timeout when processing is complete
+                            startMusicTimeout();
                         } else if (message.type === 'error') {
                             log(`Error from server: ${message.message}`);
                             status.textContent = 'Error';
@@ -770,15 +916,27 @@
 
         function displayMessage(role, content) {
             const conversationLog = document.getElementById('conversationLog');
-            const messageElement = document.createElement('p');
+            
+            // If it's the start of an AI message and we're processing
+            if (role === 'AI' && isProcessing) {
+                const messageElement = document.createElement('div');
+                messageElement.className = 'ai-message';
+                const loadingElement = document.createElement('span');
+                loadingElement.className = 'loading-indicator';
+                loadingElement.textContent = '> _';
+                messageElement.appendChild(loadingElement);
+                conversationLog.appendChild(messageElement);
+                conversationLog.scrollTop = conversationLog.scrollHeight;
+                return messageElement;
+            }
+
+            const messageElement = document.createElement('div');
             messageElement.className = role.toLowerCase() + '-message';
             
-            if (role === 'AI') {
-                messageElement.style.animation = 'decryptText 0.5s forwards';
+            if (role === 'User') {
+                messageElement.textContent = content;
             }
             
-            // Remove the role prefix from the displayed message
-            messageElement.textContent = content;
             conversationLog.appendChild(messageElement);
             conversationLog.scrollTop = conversationLog.scrollHeight;
             return messageElement;
@@ -789,8 +947,33 @@
             if (!aiMessageElement) {
                 aiMessageElement = displayMessage('AI', '');
             }
-            // Remove the "AI: " prefix since we're using styling to differentiate speakers
-            aiMessageElement.innerHTML = `${currentAIResponse}${isAIResponding ? '<span class="ai-cursor"></span>' : ''}`;
+            
+            // Remove loading indicator if it exists
+            const loadingIndicator = aiMessageElement.querySelector('.loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.remove();
+            }
+            
+            // Create or update the text element
+            let textElement = aiMessageElement.querySelector('.ai-message-text');
+            if (!textElement) {
+                textElement = document.createElement('span');
+                textElement.className = 'ai-message-text';
+                aiMessageElement.appendChild(textElement);
+            }
+            
+            textElement.textContent = currentAIResponse;
+            
+            // Add cursor if still responding
+            if (isAIResponding) {
+                let cursor = aiMessageElement.querySelector('.ai-cursor');
+                if (!cursor) {
+                    cursor = document.createElement('span');
+                    cursor.className = 'ai-cursor';
+                    aiMessageElement.appendChild(cursor);
+                }
+            }
+            
             const conversationLog = document.getElementById('conversationLog');
             conversationLog.scrollTop = conversationLog.scrollHeight;
         }
@@ -844,7 +1027,131 @@
             } catch (error) {
                 log(`Error initializing application: ${error.message}`);
             }
+
+            await initializeMusicPlayer();
         };
+
+        async function initializeMusicPlayer() {
+            try {
+                // Fetch the list of music files
+                const response = await fetch('/music');
+                const files = await response.json();
+                playlist = files.filter(file => file.endsWith('.wav'));
+                
+                // Shuffle the playlist
+                for (let i = playlist.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [playlist[i], playlist[j]] = [playlist[j], playlist[i]];
+                }
+
+                // Set up audio event listeners
+                currentAudio.addEventListener('ended', playNextTrack);
+                currentAudio.addEventListener('timeupdate', updateProgress);
+                
+                // Set up progress bar interaction
+                const progressContainer = document.querySelector('.progress-container');
+                const progressHover = document.querySelector('.progress-hover');
+                
+                // Add skip button functionality
+                const skipButton = document.querySelector('.skip-button');
+                skipButton.addEventListener('click', () => {
+                    if (isMusicPlaying) {
+                        fadeMusic(0, 200); // Quick fade out
+                        setTimeout(() => {
+                            playNextTrack();
+                            fadeMusic(musicVolume, 200); // Quick fade in
+                        }, 200);
+                    } else {
+                        playNextTrack();
+                    }
+                });
+                
+                progressContainer.addEventListener('click', (e) => {
+                    const percent = e.offsetX / progressContainer.offsetWidth;
+                    currentAudio.currentTime = currentAudio.duration * percent;
+                });
+
+                progressContainer.addEventListener('mousemove', (e) => {
+                    const percent = e.offsetX / progressContainer.offsetWidth;
+                    const time = currentAudio.duration * percent;
+                    progressHover.style.left = `${e.offsetX}px`;
+                    progressHover.textContent = formatTime(time);
+                    progressHover.style.display = 'block';
+                });
+
+                progressContainer.addEventListener('mouseleave', () => {
+                    progressHover.style.display = 'none';
+                });
+
+                // Start playing
+                playNextTrack();
+            } catch (error) {
+                console.error('Error initializing music player:', error);
+            }
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function updateProgress() {
+            const progress = (currentAudio.currentTime / currentAudio.duration) * 100;
+            document.querySelector('.progress-bar').style.width = `${progress}%`;
+        }
+
+        function playNextTrack() {
+            currentTrackIndex = (currentTrackIndex + 1) % playlist.length;
+            const track = playlist[currentTrackIndex];
+            
+            currentAudio.src = `/music/${track}`;
+            currentAudio.volume = musicVolume;
+            currentAudio.play();
+            isMusicPlaying = true;
+            
+            document.querySelector('.now-playing').innerHTML = '<span class="artist">NOW PLAYING:</span> ' + track.replace('.wav', '') + '<span class="artist"> by ZEREBRO</span>';
+        }
+
+        function fadeMusic(targetVolume, duration = 500) {
+            clearInterval(fadeInterval);
+            const startVolume = currentAudio.volume;
+            const steps = 20;
+            const volumeStep = (targetVolume - startVolume) / steps;
+            const stepDuration = duration / steps;
+            let currentStep = 0;
+
+            fadeInterval = setInterval(() => {
+                currentStep++;
+                currentAudio.volume = startVolume + (volumeStep * currentStep);
+                
+                if (currentStep >= steps) {
+                    clearInterval(fadeInterval);
+                    currentAudio.volume = targetVolume;
+                    if (targetVolume === 0) {
+                        currentAudio.pause();
+                        isMusicPlaying = false;
+                    }
+                }
+            }, stepDuration);
+        }
+
+        function clearMusicTimeout() {
+            if (musicTimeout) {
+                clearTimeout(musicTimeout);
+                musicTimeout = null;
+            }
+        }
+
+        function startMusicTimeout() {
+            clearMusicTimeout();
+            musicTimeout = setTimeout(() => {
+                if (!isRecording && !isAIResponding && !isPlaying) {
+                    currentAudio.play();
+                    fadeMusic(musicVolume);
+                }
+            }, MUSIC_TIMEOUT_DURATION);
+        }
     </script>
 </body>
 </html>

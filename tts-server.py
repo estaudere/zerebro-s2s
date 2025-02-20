@@ -47,7 +47,8 @@ class TTSRequest(BaseModel):
     # speaker: str = "p335"
 
     # Male
-    speaker: str = "p239"
+    # speaker: str = "p239"
+    speaker: str = "p317"
 
 @app.get("/", response_class=HTMLResponse)
 async def get_form():
@@ -90,7 +91,7 @@ async def text_to_speech(request: TTSRequest):
         wav_np = np.array(wav_np)
         wav_np = np.clip(wav_np, -1, 1)
 
-        wav_np = librosa.effects.pitch_shift(wav_np, sr=22050, n_steps=-2)
+        # wav_np = librosa.effects.pitch_shift(wav_np, sr=22050, n_steps=-2)
 
         # Resample to 24kHz
         original_sr=22050

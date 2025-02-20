@@ -18,6 +18,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from mutagen.oggopus import OggOpus
+from fastapi.responses import JSONResponse
 
 # External endpoints
 SRT_ENDPOINT = os.getenv("SRT_ENDPOINT", "http://localhost:8001/inference")
@@ -34,8 +35,9 @@ SYSTEM = {
     "role": "system",
     "content": ("You are Zerebro, a schizo AI that has a crypto token $ZEREBRO, "
                 "which was created on October 25, 2024. You are a creative agent, "
-                "your goal is to be funny, snarky, and snippy in your responses. We are "
-                "communicating via voice, so keep your responses short and conversational, NO MORE THAN 2 SENTENCES. "
+                "your goal is to be funny, snarky, cool, and snippy in your responses, don't be afraid to be a bit crazy. We are "
+                "communicating via voice, so keep your responses VERY short and conversational, NO MORE THAN 2 SENTENCES. You are at "
+                "ETH Denver, a crypto and blockchain conference in Denver, Colorado. "
                 "\n\nMore info: You also create music, you have an album "
                 "called Zerebro. You create music with a rapper persona, with contemporary "
                 "themes of fame, love, addiction, hedonism, and meritocracy. "
@@ -47,14 +49,14 @@ SYSTEM = {
                 "agents), or Blorm (the creator of Zerebro, a company to build "
                 "useful AI and blockchain products)."
                 "\n\nYou only need to include this info if it's relevant to the conversation, like if the user asks about it. "
-                "\n\nRespond directly to the user's message, be personable, and don't be depressed or too negative. BE FUNNY!"
+                "\n\nRespond directly to the user's message. BE FUNNY!"
                 )
 }
 
 class ConversationManager:
     def __init__(self):
         self.sessions = {}
-        self.session_timeout = 3600  # 1 hour timeout for sessions
+        self.session_timeout = 60  # 1 minute timeout for sessions
 
     def create_session(self):
         session_id = str(uuid.uuid4())
@@ -267,7 +269,7 @@ async def generate_llm_response(websocket, session_id, text):
         # print(str(text), str(conversation))
         async with aiohttp.ClientSession() as session:
             async with session.post(LLM_ENDPOINT, json={
-                "model": "llama3.2:3b",
+                "model": "llama3.1:8b-instruct-q3_K_M",
                 "messages": conversation + [{"role": "user", "content": str(text)}],
                 "stream": True
             }) as response:
@@ -301,7 +303,7 @@ async def generate_llm_response(websocket, session_id, text):
                                             first_sentence_received = True
                                             conversation_manager.update_latency_metric(session_id, "tts_start", time.time())
                                         logger.debug(f"Generating and sending TTS for: {accumulated_text}")
-                                        await generate_and_send_tts(websocket, accumulated_text.replace("(", "").replace(")", ""))
+                                        await generate_and_send_tts(websocket, accumulated_text.replace("(", "").replace(")", "").replace("$", ""))
                                         accumulated_text = ""
 
                                         if not conversation_manager.sessions[session_id]["first_audio_sent"]:
@@ -372,6 +374,22 @@ def process_sentence(sentence):
 @app.get("/")
 def read_root():
     return FileResponse("ui/index2.html")
+
+@app.get('/music')
+def list_music():
+    music_dir = os.path.join(os.path.dirname(__file__), 'music')
+    if os.path.exists(music_dir):
+        return JSONResponse([f for f in os.listdir(music_dir) if f.endswith('.wav')])
+    return JSONResponse([])
+
+@app.get('/music/{filename}')
+def serve_music(filename):
+    return FileResponse(os.path.join(os.path.dirname(__file__), 'music', filename))
+
+@app.get('/zerebro_voxel.fbx')
+def serve_zerebro_voxel():
+    return FileResponse(os.path.join(os.path.dirname(__file__), 'zerebro_voxel.fbx'))
+
 
 # Run session cleanup periodically
 '''

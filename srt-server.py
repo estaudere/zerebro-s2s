@@ -63,11 +63,34 @@ class TransformersEngine(TranscriptionEngine):
             return_timestamps=True,
             torch_dtype=torch_dtype,
             device=device,
-            model_kwargs={"attn_implementation": "flash_attention_2"} if is_flash_attn_2_available() else {"attn_implementation": "sdpa"},
+            model_kwargs={
+                "attn_implementation": "flash_attention_2" if is_flash_attn_2_available() else "sdpa",
+                "output_attentions": True,
+            },
         )
+
+    def calculate_confidence(self, result):
+        """Calculate confidence score based on model attention and logits"""
+        if not result.get("attentions"):
+            return 1.0  # Default confidence if no attention scores
+            
+        # Use attention scores as a proxy for confidence
+        attention_scores = torch.tensor(result["attentions"][-1]).mean(dim=(0,1))
+        confidence = float(attention_scores.mean().cpu())
+        return confidence
 
     def transcribe(self, file, audio_content, **kwargs):
         result = self.pipe(audio_content, **kwargs)
+        
+        # Calculate confidence score
+        confidence = self.calculate_confidence(result)
+        
+        # Only return transcription if confidence is above threshold
+        CONFIDENCE_THRESHOLD = 0.6  # Adjust this threshold as needed
+        
+        if confidence < CONFIDENCE_THRESHOLD:
+            return "", []  # Return empty if confidence is too low
+            
         return result["text"], result.get("chunks", [])
 
 class FasterWhisperEngine(TranscriptionEngine):
@@ -83,15 +106,39 @@ class FasterWhisperEngine(TranscriptionEngine):
         # 300ms
         # model_id = "distil-large-v3"
         
-        self.model = WhisperModel(model_id, device="cuda", compute_type="float16")
+        self.model = WhisperModel(
+            model_id, 
+            device="cuda", 
+            compute_type="float16",
+            beam_size=5,
+            best_of=5,
+        )
 
     def transcribe(self, file, audio_content, **kwargs):
-        segments, _ = self.model.transcribe(unquote(file.filename), beam_size=5)
+        segments, info = self.model.transcribe(
+            unquote(file.filename),
+            beam_size=5,
+            word_timestamps=True,
+            condition_on_previous_text=True,
+            compression_ratio_threshold=2.4,
+            log_prob_threshold=-1.0,
+            no_speech_threshold=0.6,
+        )
 
-        full_text = "".join(segment.text for segment in segments)
+        # Filter segments by confidence
+        CONFIDENCE_THRESHOLD = 0.6
+        filtered_segments = [
+            s for s in segments 
+            if s.avg_logprob > -1.0 and s.compression_ratio < 2.4
+        ]
+
+        if not filtered_segments:
+            return "", []
+
+        full_text = "".join(segment.text for segment in filtered_segments)
         logger.info(full_text)
 
-        return full_text, [{"start": s.start, "end": s.end, "text": s.text} for s in segments]
+        return full_text, [{"start": s.start, "end": s.end, "text": s.text} for s in filtered_segments]
 
 '''
 WIP - ffmpeg fails
