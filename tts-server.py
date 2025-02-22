@@ -48,7 +48,8 @@ class TTSRequest(BaseModel):
 
     # Male
     # speaker: str = "p239"
-    speaker: str = "p317"
+    # speaker: str = "p317"
+    speaker: str = "p234"
 
 @app.get("/", response_class=HTMLResponse)
 async def get_form():

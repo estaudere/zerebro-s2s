@@ -9,142 +9,431 @@
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
+        /* Reset and base styles */
+        * {
             margin: 0;
-            background-color: #f0f0f0;
+            padding: 0;
+            box-sizing: border-box;
         }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #000;
+            color: #888;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
         .container {
-            text-align: center;
-            background-color: white;
             padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            max-width: 800px;
+            height: 100vh;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Control elements */
+        .controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 20px;
+        }
+
+        .control-circle {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #444;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        #vadToggle.active {
+            background: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        #recordIndicator.recording {
+            background: #ff0000;
+            box-shadow: 0 0 10px #ff0000;
+        }
+
+        /* Audio visualizer */
+        .visualizer-container {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            /* transform: translateY(-50%); */
+            width: 30px;
+            height: 200px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .visualizer-block {
             width: 100%;
+            height: 8px;
+            background: #222;
+            transition: background 0.1s ease;
         }
-        #status, #timer, #latency {
-            margin-top: 1rem;
-            font-weight: bold;
+
+        .visualizer-block.active {
+            background: #00ff00;
         }
-        #logArea {
-            width: 100%;
-            height: 400px;
-            margin-top: 1rem;
-            padding: 0.5rem;
-            border: 1px solid #ccc;
-            overflow-y: auto;
-            text-align: left;
-            font-family: monospace;
-            font-size: 0.9rem;
-        }
+
+        /* Conversation display */
         #conversationLog {
+            max-width: 600px;
             width: 100%;
-            height: 300px;
-            border: 1px solid #ccc;
-            overflow-y: auto;
-            margin-top: 1rem;
-            padding: 0.5rem;
-            font-family: Arial, sans-serif;
+            margin-top: 20px;
+            padding: 1rem;
+            position: absolute;
+            top: 60%;
+            left: 50%;
+            transform: translateX(-50%);
+            overflow: hidden;
         }
+
+        #conversationLog::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #conversationLog::-webkit-scrollbar-track {
+            background: #000;
+        }
+
+        #conversationLog::-webkit-scrollbar-thumb {
+            background: #333;
+        }
+
+        .message-pair.fade-out {
+            opacity: 0;
+            transition: opacity 1s ease-out;
+        }
+
+        .message-pair {
+            opacity: 1;
+        }
+
+        .message-pair.visible {
+            display: block;
+        }
+
         .user-message {
-            color: blue;
+            color: #666;
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
         }
+
         .ai-message {
-            color: green;
+            color: #00ff00;
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+            position: relative;
         }
+
+        .ai-message-text {
+            color: #00ff00;
+        }
+
+        @keyframes decryptCharacter {
+            0% { color: #444; }
+            90% { color: #0f0; content: attr(data-decrypt); }
+            100% { color: #0f0; content: attr(data-final); }
+        }
+
+        .decrypting-text {
+            display: inline;
+            color: #0f0;
+        }
+
+        .decrypt-char {
+            position: relative;
+            display: inline-block;
+        }
+
+        .decrypt-char.animating {
+            animation: decryptCharacter 0.1s linear;
+        }
+
+        .ai-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 1.2em;
+            background: #00ff00;
+            margin-left: 4px;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* Hide debug elements */
+        #timer, #latencyMetrics, #status, #logArea {
+            display: none;
+        }
+
+        /* New debug metrics style */
         #latencyMetrics {
-            margin-top: 10px;
-            font-size: 0.9em;
-            font-family: monospace;
+            display: none;  /* Hidden by default */
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border: 1px solid #333;
+            font-family: 'Courier New', monospace;
+            font-size: 0.7rem;
+            color: #666;
+            max-width: 200px;
         }
+
+        #latencyMetrics.show {
+            display: block;
+        }
+
         #latencyMetrics table {
             width: 100%;
             border-collapse: collapse;
         }
-        #latencyMetrics th, #latencyMetrics td {
-            border: 1px solid #ddd;
-            padding: 8px;
+
+        #latencyMetrics td {
+            padding: 2px 4px;
+            border: none;
+        }
+
+        #latencyMetrics td:first-child {
+            text-align: right;
+        }
+
+        #latencyMetrics td:last-child {
             text-align: left;
-        }
-        #latencyMetrics th {
-            background-color: #f2f2f2;
-            font-weight: bold;
+            color: #888;
         }
 
+        .loading-indicator {
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            animation: loadingBlink 1s infinite;
+        }
 
-        button {
-            display: block;
-            font-size: 1rem;
-            padding: 0.5rem 1rem;
-            margin: 1.0rem auto;
-            width: 18rem;
+        @keyframes loadingBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .music-player {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 20px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            text-align: center;
+            min-width: 300px;
+        }
+
+        .artist {
+            color: #666;
+        }
+
+        .music-controls {
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 5px;
+        }
+
+        .skip-button {
+            background: none;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 3px 8px;
+            border-radius: 3px;
             cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
         }
-        button {
-            user-select: none;
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
+
+        .skip-button:hover {
+            background: #00ff00;
+            color: black;
         }
-        button:active {
-            background-color: #ff0000;
-            color: white;
+
+        .now-playing {
+            color: #00ff00;
+            font-size: 1.2rem;
+            margin-bottom: 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .progress-container {
+            width: 100%;
+            height: 4px;
+            background: #333;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: #00ff00;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+
+        .progress-hover {
+            position: absolute;
+            top: -20px;
+            background: #00ff00;
+            color: black;
+            padding: 2px 4px;
+            border-radius: 2px;
+            font-size: 0.8rem;
+            display: none;
+        }
+        body {
+            margin: 0;
+            background: black;
+            color: #33ff33;
+            overflow: hidden;
+            font-family: monospace;
+        }
+        #container {
+            position: absolute;
+            width: 500px;
+            height: 500px;
+            top: 30%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+        }
+        #speakButton {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background: #33ff33;
+            color: black;
+            border: none;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        /* Add this style for the fade out animation */
+        /* @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        } */
+
+        /* Add this CSS to the existing <style> section */
+        .loading-dots {
+            color: #00ff00;
+            opacity: 1;
+            animation: loadingDots 1.5s infinite;
+        }
+
+        @keyframes loadingDots {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 1; }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>voicechat2</h1>
+        <div class="controls">
+            <div id="vadToggle" class="control-circle"></div>
+            <div id="recordIndicator" class="control-circle"></div>
+        </div>
+
+        <div class="visualizer-container">
+            <!-- Will be populated by JavaScript -->
+        </div>
+
+        <div id="conversationLog"></div>
+
+        <!-- Hidden elements for functionality -->
         <div id="timer">00:00:000</div>
-        <button id="vadToggle">Enable Voice Auto Detection</button>
-        <button id="recordButton">Press and Hold to Chat</button>
-        <p>You can also hold the space bar to chat!</p>
         <div id="latencyMetrics">
             <table>
-                <tr>
-                    <th>Metric</th>
-                    <th>Value</th>
-                </tr>
-                <tr>
-                    <td>Total Voice-to-Voice</td>
-                    <td id="totalVoiceToVoice">0ms</td>
-                </tr>
-                <tr>
-                    <td>SRT Duration</td>
-                    <td id="srtDuration">0ms</td>
-                </tr>
-                <tr>
-                    <td>LLM TTFT</td>
-                    <td id="llmTTFT">0ms</td>
-                </tr>
-                <tr>
-                    <td>LLM TTFS</td>
-                    <td id="llmTTFS">0ms</td>
-                </tr>
-                <tr>
-                    <td>TTS Duration</td>
-                    <td id="ttsDuration">0ms</td>
-                </tr>
-                <tr>
-                    <td>Network Latency</td>
-                    <td id="networkLatency">0ms</td>
-                </tr>
+                <tr><td>V2V:</td><td id="totalVoiceToVoice">0</td><td>ms</td></tr>
+                <tr><td>SRT:</td><td id="srtDuration">0</td><td>ms</td></tr>
+                <tr><td>TTFT:</td><td id="llmTTFT">0</td><td>ms</td></tr>
+                <tr><td>TTFS:</td><td id="llmTTFS">0</td><td>ms</td></tr>
+                <tr><td>TTS:</td><td id="ttsDuration">0</td><td>ms</td></tr>
             </table>
         </div>
         <div id="status">Ready</div>
-        <div id="conversationLog"></div>
         <div id="logArea"></div>
+        <div id="vadStatusMessage" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); color: #666; font-size: 1.2rem; opacity: 0.7;">
+            Press and hold spacebar to speak
+        </div>
+
+        <div class="music-player">
+            <div class="music-controls">
+                <div class="now-playing">Loading music...</div>
+                <button class="skip-button">▶︎▶︎</button>
+            </div>
+            <div class="progress-container">
+                <div class="progress-bar"></div>
+                <div class="progress-hover"></div>
+            </div>
+        </div>
     </div>
 
-    <script>
+    <div id="container">
+        <div id="loading">Loading...|</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "./node_modules/three/build/three.module.js",
+                "three/examples/jsm/loaders/FBXLoader.js": "./node_modules/three/examples/jsm/loaders/FBXLoader.js",
+                "three/examples/jsm/controls/OrbitControls.js": "./node_modules/three/examples/jsm/controls/OrbitControls.js",
+                "three/examples/jsm/effects/AsciiEffect.js": "./node_modules/three/examples/jsm/effects/AsciiEffect.js",
+                "three/examples/jsm/libs/lil-gui.module.min.js": "./node_modules/three/examples/jsm/libs/lil-gui.module.min.js"
+            }
+        }
+    </script>
+    <script src="./avatar.js" type="module"></script>
+    <script type="module">
+        import { AvatarRenderer } from './avatar.js';
+        // Add this at the top of the script section
+        const DEBUG = false; // Set this to false to hide debug info
+
+        // First, modify the block creation code at the start of the script
+        const visualizerContainer = document.querySelector('.visualizer-container');
+        // Create blocks in reverse order (19 to 0)
+        for (let i = 19; i >= 0; i--) {
+            const block = document.createElement('div');
+            block.className = 'visualizer-block';
+            visualizerContainer.appendChild(block);
+        }
+
         // Elements to update
         const vadToggle = document.getElementById('vadToggle');
-        const recordButton = document.getElementById('recordButton');
+        const recordIndicator = document.getElementById('recordIndicator');
         const status = document.getElementById('status');
         const logArea = document.getElementById('logArea');
         const timerDisplay = document.getElementById('timer');
@@ -161,6 +450,7 @@
         let recordingStartTime;
         let recorder;
         let timerInterval;
+        let audioChunks = [];
 
         // VAD
         let isVADEnabled = false;
@@ -174,6 +464,18 @@
         // Playback
         let audioQueue = [];
         let isPlaying = false;
+
+        // Music player
+        let currentAudio = new Audio();
+        let playlist = [];
+        let currentTrackIndex = -1;
+        let isMusicPlaying = false;
+        let musicVolume = 0.2;
+        let fadeInterval;
+        let musicTimeout = null;
+        const MUSIC_TIMEOUT_DURATION = 15000; // 20 seconds in milliseconds
+
+        let avatar = null;
 
         // Ping every second
         function startLatencyMeasurement() {
@@ -208,7 +510,7 @@
         async function toggleVAD() {
             if (isVADEnabled) {
                 isVADEnabled = false;
-                vadToggle.textContent = 'Enable Voice Auto Detection';
+                vadToggle.classList.remove('active');
                 vadToggle.style.background = '';
                 vadToggle.style.color = '';
                 if (myvad) {
@@ -216,13 +518,15 @@
                     // myvad = null;
                 }
                 updateStatus('VAD disabled');
+                document.getElementById('vadStatusMessage').textContent = 'Automatic voice detection on';
             } else {
                 isVADEnabled = true;
-                vadToggle.textContent = 'Disable Voice Auto Detection';
+                vadToggle.classList.add('active');
                 vadToggle.style.background = 'red';
                 vadToggle.style.color = 'white';
                 initializeVAD();
                 updateStatus('VAD enabled');
+                document.getElementById('vadStatusMessage').textContent = 'Press and hold spacebar to speak';
             }
         }
         async function startVAD() {
@@ -232,8 +536,6 @@
                 }
                 updateStatus('VAD enabled');
             }
-
-            updateStatuss
         }
         async function pauseVAD() {
             if(isVADEnabled) {
@@ -304,11 +606,22 @@
             try {
                 if(!myvad) {
                     myvad = await vad.MicVAD.new({
+                        minSpeechEnergy: 0.50,  // Increase this to require louder speech (0-1.0)
+                        maxSilenceEnergy: 0.20,  // Increase this to be more tolerant of background noise
+                        minPeakEnergy: 0.3,     // Minimum peak energy to trigger speech
+                        silenceTimeoutMs: 200,   // How long to wait before stopping after silence
+                        redemptionFrames: 8,     // How many frames to wait before confirming speech ended
+                        
+                        onSpeechStart: () => {
+                            // Add this to show recording indicator when speech starts
+                            document.getElementById('recordIndicator').classList.add('recording');
+                        },
                         onSpeechEnd: async(audio) => {
+                            // Remove recording indicator when speech ends
+                            document.getElementById('recordIndicator').classList.remove('recording');
+                            
                             let opusBlob;
-
                             console.log('Speech ended, audio length:', audio.length);
-
                             clearInterval(timerInterval);
 
                             try {
@@ -339,9 +652,10 @@
                             } catch (error) {
                                 console.error('Error encoding audio:', error);
                             }
-
                         },
                         onVADMisfire: () => {
+                            // Add this to ensure recording indicator is removed on misfire
+                            document.getElementById('recordIndicator').classList.remove('recording');
                             log('VAD misfire detected');
                         }
                     });
@@ -362,6 +676,10 @@
 
         function startRecording() {
             if (!isRecording) {
+                if (isMusicPlaying) {
+                    fadeMusic(0);
+                }
+                clearMusicTimeout(); // Clear any existing timeout
                 stopLatencyMeasurement();
 
                 // Clear the previous AI response when starting a new recording
@@ -372,8 +690,10 @@
                 isRecording = true;
                 recordingStartTime = Date.now();
                 updateTimerDisplay();
+                audioChunks = [];
                 recorder.start();
                 document.getElementById('status').textContent = 'Recording...';
+                document.getElementById('recordIndicator').classList.add('recording');
             }
         }
 
@@ -386,6 +706,9 @@
                     document.getElementById('status').textContent = 'Processing...';
                     recordingEndTime = Date.now();
 
+                    // Don't start music immediately after recording
+                    clearMusicTimeout();
+
                     // Ensure WebSocket is open, reinitialize if necessary
                     if (!socket || socket.readyState !== WebSocket.OPEN) {
                         log('WebSocket is not open. Reinitializing...');
@@ -397,13 +720,22 @@
                         }
                     }
 
-                    // Send stop_recording message to server
-                    const stopMessage = JSON.stringify({ action: "stop_recording" });
-                    log(`Sending stop_recording message: ${stopMessage}`);
-                    socket.send(stopMessage);
+                    // Create blob from accumulated chunks and send
+                    const blob = new Blob(audioChunks, { 'type' : 'audio/ogg; codecs=opus' });
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        log(`Sending audio file: ${blob.size} bytes`);
+                        socket.send(blob);
+                        // Send stop_recording message to server
+                        const stopMessage = JSON.stringify({ action: "stop_recording" });
+                        log(`Sending stop_recording message: ${stopMessage}`);
+                        socket.send(stopMessage);
+                    } else {
+                        log('WebSocket is not open. Cannot send audio.');
+                    }
                 } catch (error) {
                     log(`Error stopping recording: ${error.message}`);
                 }
+                document.getElementById('recordIndicator').classList.remove('recording');
             }
         }
 
@@ -418,12 +750,12 @@
             }
         }
 
-        // Button event listeners
-        recordButton.addEventListener('mousedown', startRecording);
-        recordButton.addEventListener('mouseup', stopRecording);
-        recordButton.addEventListener('mouseleave', stopRecording);
+        // Add event listeners for the record indicator circle instead
+        recordIndicator.addEventListener('mousedown', startRecording);
+        recordIndicator.addEventListener('mouseup', stopRecording);
+        recordIndicator.addEventListener('mouseleave', stopRecording);
 
-        // Spacebar event listeners
+        // Keep the existing spacebar event listeners
         document.addEventListener('keydown', (event) => {
             if (event.code === 'Space' && !isRecording) {
                 event.preventDefault(); // Prevent scrolling
@@ -439,45 +771,53 @@
         });
 
         // Touch event listeners for mobile devices
-        recordButton.addEventListener('touchstart', (event) => {
+        recordIndicator.addEventListener('touchstart', (event) => {
             event.preventDefault();
             startRecording();
         });
 
-        recordButton.addEventListener('touchend', (event) => {
+        recordIndicator.addEventListener('touchend', (event) => {
             event.preventDefault();
             stopRecording();
         });
 
         function playNextAudio() {
-            if(!isPlaying) {
+            if (!isPlaying) {
                 startVAD();
             }
 
             if (audioQueue.length === 0 || isPlaying) {
+                if (audioQueue.length === 0) {
+                    // Start music timeout when AI finishes talking
+                    startMusicTimeout();
+                }
                 return;
             }
 
             isPlaying = true;
             pauseVAD();
+            avatar.isSpeaking = true;
 
             const audioBlob = audioQueue.shift();
             const audio = new Audio(URL.createObjectURL(audioBlob));
 
             audio.onended = () => {
                 isPlaying = false;
+                avatar.isSpeaking = false;
                 playNextAudio(); // Play the next audio in the queue
             };
 
             audio.onerror = (error) => {
                 log(`Error playing audio: ${error.message}`);
                 isPlaying = false;
+                avatar.isSpeaking = false;
                 playNextAudio(); // Try to play the next audio in case of an error
             };
 
             audio.play().catch((error) => {
                 log(`Error starting audio playback: ${error.message}`);
                 isPlaying = false;
+                avatar.isSpeaking = false;
                 playNextAudio(); // Try to play the next audio in case of an error
             });
         }
@@ -501,17 +841,32 @@
         }
 
         let audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        let analyzerNode;
 
         async function createSourceNode() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                return audioContext.createMediaStreamSource(stream);
+                const sourceNode = audioContext.createMediaStreamSource(stream);
+                
+                // Create and connect analyzer node here
+                analyzerNode = audioContext.createAnalyser();
+                analyzerNode.fftSize = 64;
+                sourceNode.connect(analyzerNode);
+                
+                return sourceNode;
             } catch {
                 // If we don't resample then recording will be 48K, 4x too slow...
-                recordButton.style.display = 'None';
+                recordIndicator.style.display = 'None';
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                return audioContext.createMediaStreamSource(stream);
+                const sourceNode = audioContext.createMediaStreamSource(stream);
+                
+                // Create and connect analyzer node here too
+                analyzerNode = audioContext.createAnalyser();
+                analyzerNode.fftSize = 64;
+                sourceNode.connect(analyzerNode);
+                
+                return sourceNode;
             }
         }
 
@@ -534,15 +889,6 @@
 
             recorder.ondataavailable = (typedArray) => {
                 log(`Data available: ${typedArray.length} bytes`);
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(typedArray);
-                }
-            };
-
-            let audioChunks = [];
-
-            recorder.ondataavailable = (typedArray) => {
-                log(`Data available: ${typedArray.length} bytes`);
                 audioChunks.push(typedArray);
             };
 
@@ -557,16 +903,6 @@
                 log('Recording stopped');
                 status.textContent = 'Processing...';
                 clearInterval(timerInterval);
-
-                const blob = new Blob(audioChunks, { 'type' : 'audio/ogg; codecs=opus' });
-                audioChunks = []; // Clear the chunks for the next recording
-            
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    log(`Sending audio file: ${blob.size} bytes`);
-                    socket.send(blob);
-                } else {
-                    log('WebSocket is not open. Cannot send audio.');
-                }
             };
         }
 
@@ -587,7 +923,7 @@
         socket.onopen = () => {
                 log('WebSocket connected');
                 status.textContent = 'Ready';
-                recordButton.disabled = false;
+                recordIndicator.disabled = false;
                 startLatencyMeasurement();
                 resolve(socket);
         };
@@ -595,7 +931,7 @@
         socket.onclose = (event) => {
                 log(`WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
                 status.textContent = 'Disconnected';
-                recordButton.disabled = true;
+                recordIndicator.disabled = true;
                 stopLatencyMeasurement();
                 reject(new Error('WebSocket closed'));
         };
@@ -609,7 +945,11 @@
             socket.onmessage = (event) => {
                 log(`Received message from server: ${typeof event.data}`);
                 if (event.data instanceof Blob) {
-                    // Handle audio data
+                    // Stop music when AI starts talking
+                    if (isMusicPlaying) {
+                        fadeMusic(0);
+                    }
+                    clearMusicTimeout(); // Clear any existing timeout
                     queueAudioForPlayback(event.data);
                 } else {
                     // Handle JSON messages
@@ -623,11 +963,12 @@
 
                         if (message.type === 'pong') {
                             const latency = performance.now() - ping;
-                            // console.log(`Current network latency: ${latency.toFixed(2)}ms`);
                             updateLatencyDisplay(latency);
                         } else if (message.type === 'text') {
                             // Handle streamed text from LLM
-                            updateAIResponse(message.content);
+                            if (message.content) {
+                                updateAIResponse(message.content);
+                            }
                         } else if (message.type === 'transcription') {
                             // Handle transcribed user input
                             displayMessage('User', message.content);
@@ -635,6 +976,9 @@
                             currentAIResponse = '';
                             aiMessageElement = null;
                             isAIResponding = true;
+                            isProcessing = true;  // Set this to true when processing starts
+                            // Create loading indicator
+                            aiMessageElement = displayMessage('AI', '');
                         } else if (message.type === 'first_audio_response') {
                             firstResponseTime = Date.now();
                         } else if (message.type === 'latency_metrics') {
@@ -642,13 +986,17 @@
                         } else if (message.type === 'processing_complete') {
                             status.textContent = 'Ready';
                             isProcessing = false;
-                            startLatencyMeasurement;
+                            startLatencyMeasurement();
                             isAIResponding = false;
                             // Remove the cursor
                             if (aiMessageElement) {
                                 const cursor = aiMessageElement.querySelector('.ai-cursor');
+                                let aiPair = aiMessageElement.parentElement;
+                                startFadeOutTimer(aiPair);
                                 if (cursor) cursor.remove();
                             }
+                            // Start music timeout when processing is complete
+                            startMusicTimeout();
                         } else if (message.type === 'error') {
                             log(`Error from server: ${message.message}`);
                             status.textContent = 'Error';
@@ -664,22 +1012,56 @@
 
 
         function updateLatencyMetrics(metrics) {
-            document.getElementById("totalVoiceToVoice").textContent = `${(metrics.total_voice_to_voice * 1000).toFixed(1)}ms`;
-            document.getElementById("srtDuration").textContent = `${(metrics.srt_duration * 1000).toFixed(1)}ms`;
-            document.getElementById("llmTTFT").textContent = `${(metrics.llm_ttft * 1000).toFixed(1)}ms`;
-            document.getElementById("llmTTFS").textContent = `${(metrics.llm_ttfs * 1000).toFixed(1)}ms`;
-            document.getElementById("ttsDuration").textContent = `${(metrics.tts_duration * 1000).toFixed(1)}ms`;
+            if (!DEBUG) return;
+            
+            document.getElementById("totalVoiceToVoice").textContent = `${(metrics.total_voice_to_voice * 1000).toFixed(1)}`;
+            document.getElementById("srtDuration").textContent = `${(metrics.srt_duration * 1000).toFixed(1)}`;
+            document.getElementById("llmTTFT").textContent = `${(metrics.llm_ttft * 1000).toFixed(1)}`;
+            document.getElementById("llmTTFS").textContent = `${(metrics.llm_ttfs * 1000).toFixed(1)}`;
+            document.getElementById("ttsDuration").textContent = `${(metrics.tts_duration * 1000).toFixed(1)}`;
         }
 
 
         function displayMessage(role, content) {
             const conversationLog = document.getElementById('conversationLog');
-            const messageElement = document.createElement('p');
-            messageElement.className = role.toLowerCase() + '-message';
-            messageElement.textContent = `${role}: ${content}`;
-            conversationLog.appendChild(messageElement);
-            conversationLog.scrollTop = conversationLog.scrollHeight;
-            return messageElement;
+            
+            if (role === 'User') {
+                // Remove previous message pair if it exists
+                const previousPair = conversationLog.querySelector('.message-pair');
+                if (previousPair) {
+                    previousPair.remove();
+                }
+                
+                // Create new message pair
+                const messagePair = document.createElement('div');
+                messagePair.className = 'message-pair visible';
+                
+                const messageElement = document.createElement('div');
+                messageElement.className = 'user-message';
+                messageElement.textContent = content;
+                
+                messagePair.appendChild(messageElement);
+                conversationLog.appendChild(messagePair);
+                return messageElement;
+            } else {
+                // Find the current message pair
+                const currentPair = conversationLog.querySelector('.message-pair');
+                
+                const messageElement = document.createElement('div');
+                messageElement.className = 'ai-message';
+                
+                // Add loading dots
+                const loadingDots = document.createElement('span');
+                loadingDots.className = 'loading-dots';
+                loadingDots.textContent = '...';
+                messageElement.appendChild(loadingDots);
+                
+                if (currentPair) {
+                    currentPair.appendChild(messageElement);
+                }
+                
+                return messageElement;
+            }
         }
 
         function updateAIResponse(newContent) {
@@ -687,19 +1069,108 @@
             if (!aiMessageElement) {
                 aiMessageElement = displayMessage('AI', '');
             }
-            aiMessageElement.innerHTML = `AI: ${currentAIResponse}${isAIResponding ? '<span class="ai-cursor"></span>' : ''}`;
-            const conversationLog = document.getElementById('conversationLog');
-            conversationLog.scrollTop = conversationLog.scrollHeight;
+            
+            const messagePair = aiMessageElement.parentElement;
+            
+            // Remove loading dots if they exist
+            const loadingDots = aiMessageElement.querySelector('.loading-dots');
+            if (loadingDots) {
+                loadingDots.remove();
+            }
+            
+            // Create or update the text element
+            let textElement = aiMessageElement.querySelector('.decrypting-text');
+            if (!textElement) {
+                textElement = document.createElement('div');
+                textElement.className = 'decrypting-text';
+                aiMessageElement.appendChild(textElement);
+            }
+
+            // Get the new characters that need to be added
+            const existingLength = textElement.children.length;
+            const newChars = currentAIResponse.slice(existingLength);
+
+            // Add new characters with decryption effect
+            for (let char of newChars) {
+                const charSpan = document.createElement('span');
+                charSpan.className = 'decrypt-char';
+                
+                if (char === ' ') {
+                    charSpan.innerHTML = '&nbsp;';
+                    charSpan.style.margin = '0 0.25em 0 0';
+                    textElement.appendChild(charSpan);
+                    continue;
+                }
+                
+                charSpan.classList.add('animating');
+                charSpan.textContent = getRandomChar();
+                textElement.appendChild(charSpan);
+
+                // Create multiple random character changes
+                let changes = 0;
+                const maxChanges = 5;
+                const changeInterval = setInterval(() => {
+                    if (changes >= maxChanges) {
+                        clearInterval(changeInterval);
+                        charSpan.textContent = char;
+                        charSpan.classList.remove('animating');
+                        
+                        // If this is the last character and no more text is coming,
+                        // start the fade-out timer
+                    } else {
+                        charSpan.textContent = getRandomChar();
+                        changes++;
+                    }
+                }, 50);
+            }
         }
 
+        function getRandomChar() {
+            const chars = '!@#$%^&*()_+-=[]{}|;:,.<>?/~`0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+            return chars[Math.floor(Math.random() * chars.length)];
+        }
 
         let recordingEndTime;
         let firstResponseTime;
         
-        // Initialize recorder and WebSocket when the page loads
+        // Audio visualization
+        async function setupAudioVisualization() {
+            const blocks = document.querySelectorAll('.visualizer-block');
+            const dataArray = new Uint8Array(analyzerNode.frequencyBinCount);
+
+            function updateVisualizer() {
+                analyzerNode.getByteFrequencyData(dataArray);
+                
+                // Process frequency bands from bottom to top
+                for (let i = 0; i < blocks.length; i++) {
+                    // Reverse the index to map bottom frequencies to bottom blocks
+                    const value = dataArray[blocks.length - 1 - i];
+                    const block = blocks[i];
+                    if (value > 128) {
+                        block.classList.add('active');
+                    } else {
+                        block.classList.remove('active');
+                    }
+                }
+                
+                requestAnimationFrame(updateVisualizer);
+            }
+
+            updateVisualizer();
+        }
+
+        // Keep only this onload function
         window.onload = async () => {
+            // Show debug elements if DEBUG is true
+            if (DEBUG) {
+                document.getElementById('latencyMetrics').classList.add('show');
+            }
+
+            avatar = new AvatarRenderer();
+
             await initializeRecorder();
             await recorder.initialize;
+            await setupAudioVisualization();
             console.log('Recorder object:', recorder);
             console.log('Encoder object:', recorder.encoder);
 
@@ -709,7 +1180,143 @@
             } catch (error) {
                 log(`Error initializing application: ${error.message}`);
             }
+
+            await initializeMusicPlayer();
         };
+
+        async function initializeMusicPlayer() {
+            try {
+                // Fetch the list of music files
+                const response = await fetch('/music');
+                const files = await response.json();
+                playlist = files.filter(file => file.endsWith('.wav'));
+                
+                // Shuffle the playlist
+                for (let i = playlist.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [playlist[i], playlist[j]] = [playlist[j], playlist[i]];
+                }
+
+                // Set up audio event listeners
+                currentAudio.addEventListener('ended', playNextTrack);
+                currentAudio.addEventListener('timeupdate', updateProgress);
+                
+                // Set up progress bar interaction
+                const progressContainer = document.querySelector('.progress-container');
+                const progressHover = document.querySelector('.progress-hover');
+                
+                // Add skip button functionality
+                const skipButton = document.querySelector('.skip-button');
+                skipButton.addEventListener('click', () => {
+                    if (isMusicPlaying) {
+                        fadeMusic(0, 200); // Quick fade out
+                        setTimeout(() => {
+                            playNextTrack();
+                            fadeMusic(musicVolume, 200); // Quick fade in
+                        }, 200);
+                    } else {
+                        playNextTrack();
+                    }
+                });
+                
+                progressContainer.addEventListener('click', (e) => {
+                    const percent = e.offsetX / progressContainer.offsetWidth;
+                    currentAudio.currentTime = currentAudio.duration * percent;
+                });
+
+                progressContainer.addEventListener('mousemove', (e) => {
+                    const percent = e.offsetX / progressContainer.offsetWidth;
+                    const time = currentAudio.duration * percent;
+                    progressHover.style.left = `${e.offsetX}px`;
+                    progressHover.textContent = formatTime(time);
+                    progressHover.style.display = 'block';
+                });
+
+                progressContainer.addEventListener('mouseleave', () => {
+                    progressHover.style.display = 'none';
+                });
+
+                // Start playing
+                playNextTrack();
+            } catch (error) {
+                console.error('Error initializing music player:', error);
+            }
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function updateProgress() {
+            const progress = (currentAudio.currentTime / currentAudio.duration) * 100;
+            document.querySelector('.progress-bar').style.width = `${progress}%`;
+        }
+
+        function playNextTrack() {
+            currentTrackIndex = (currentTrackIndex + 1) % playlist.length;
+            const track = playlist[currentTrackIndex];
+            
+            currentAudio.src = `/music/${track}`;
+            currentAudio.volume = musicVolume;
+            currentAudio.play();
+            isMusicPlaying = true;
+            
+            document.querySelector('.now-playing').innerHTML = '<span class="artist">NOW PLAYING:</span> ' + track.replace('.wav', '') + '<span class="artist"> by ZEREBRO</span>';
+        }
+
+        function fadeMusic(targetVolume, duration = 500) {
+            clearInterval(fadeInterval);
+            const startVolume = currentAudio.volume;
+            const steps = 20;
+            const volumeStep = (targetVolume - startVolume) / steps;
+            const stepDuration = duration / steps;
+            let currentStep = 0;
+
+            fadeInterval = setInterval(() => {
+                currentStep++;
+                currentAudio.volume = startVolume + (volumeStep * currentStep);
+                
+                if (currentStep >= steps) {
+                    clearInterval(fadeInterval);
+                    currentAudio.volume = targetVolume;
+                    if (targetVolume === 0) {
+                        currentAudio.pause();
+                        isMusicPlaying = false;
+                    }
+                }
+            }, stepDuration);
+        }
+
+        function clearMusicTimeout() {
+            if (musicTimeout) {
+                clearTimeout(musicTimeout);
+                musicTimeout = null;
+            }
+        }
+
+        function startMusicTimeout() {
+            clearMusicTimeout();
+            musicTimeout = setTimeout(() => {
+                if (!isRecording && !isAIResponding && !isPlaying) {
+                    currentAudio.play();
+                    fadeMusic(musicVolume);
+                }
+            }, MUSIC_TIMEOUT_DURATION);
+        }
+
+        // Add this new function to handle the fade out
+        function startFadeOutTimer(messagePair) {
+            // Wait 5 seconds then start fade
+            setTimeout(() => {
+                messagePair.classList.add('fade-out');
+                // Wait 1 second for fade animation, then remove
+                setTimeout(() => {
+                    messagePair.remove();
+                }, 1000);
+            }, 15 * 1000); // 15 seconds for the fade out
+        }
     </script>
 </body>
 </html>

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Avatar Test</title>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "./node_modules/three/build/three.module.js",
+            "three/examples/jsm/loaders/FBXLoader.js": "./node_modules/three/examples/jsm/loaders/FBXLoader.js",
+            "three/examples/jsm/controls/OrbitControls.js": "./node_modules/three/examples/jsm/controls/OrbitControls.js",
+            "three/examples/jsm/effects/AsciiEffect.js": "./node_modules/three/examples/jsm/effects/AsciiEffect.js",
+            "three/examples/jsm/libs/lil-gui.module.min.js": "./node_modules/three/examples/jsm/libs/lil-gui.module.min.js"
+        }
+    }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            background: black;
+            color: #33ff33;
+            overflow: hidden;
+            font-family: monospace;
+        }
+        #container {
+            position: relative;
+            width: 250px;
+            height: 250px;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+        }
+        #speakButton {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background: #33ff33;
+            color: black;
+            border: none;
+            cursor: pointer;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="loading">Loading...|</div>
+    </div>
+    <button id="speakButton">Simulate Speaking</button>
+    <script src="avatar.js" type="module"></script>
+</body>
+</html>

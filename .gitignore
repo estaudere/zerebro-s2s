@@ -13,7 +13,6 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-build/
 develop-eggs/
 dist/
 downloads/
@@ -172,3 +171,4 @@ stems/
 bin/
 
 zerebro_voxel.fbx
+speaker_tests/

@@ -303,7 +303,7 @@ async def generate_llm_response(websocket, session_id, text):
                                             first_sentence_received = True
                                             conversation_manager.update_latency_metric(session_id, "tts_start", time.time())
                                         logger.debug(f"Generating and sending TTS for: {accumulated_text}")
-                                        await generate_and_send_tts(websocket, accumulated_text.replace("(", "").replace(")", "").replace("$", ""))
+                                        await generate_and_send_tts(websocket, accumulated_text.replace("(", "").replace(")", "").replace("$", "").replace("ETH", "eeth"))
                                         accumulated_text = ""
 
                                         if not conversation_manager.sessions[session_id]["first_audio_sent"]:
@@ -373,7 +373,7 @@ def process_sentence(sentence):
 
 @app.get("/")
 def read_root():
-    return FileResponse("ui/index2.html")
+    return FileResponse("ui/index.html")
 
 @app.get('/music')
 def list_music():
@@ -386,9 +386,9 @@ def list_music():
 def serve_music(filename):
     return FileResponse(os.path.join(os.path.dirname(__file__), 'music', filename))
 
-@app.get('/zerebro_voxel.fbx')
-def serve_zerebro_voxel():
-    return FileResponse(os.path.join(os.path.dirname(__file__), 'zerebro_voxel.fbx'))
+@app.get('/{filename:path}')
+def serve_file(filename):
+    return FileResponse(os.path.join(os.path.dirname(__file__), "ui", filename))
 
 
 # Run session cleanup periodically
