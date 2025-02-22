@@ -28,4 +28,21 @@ if ! ollama list | grep -q "llama3.2:3b"; then
     exit 1
 fi
 
+# check that the music folder is downloaded, if not, download it
+if [ ! -d "music" ]; then
+    echo "Downloading music..."
+    curl -L "https://drive.usercontent.google.com/download?id=1vTske5Pn-PcAXZx6q3mZv9YzRzW4Gr_2&confirm=xxx" -o music.zip
+    unzip music.zip
+    rm music.zip
+    rm -rf __MACOSX
+fi
+echo "Music downloaded"
+
+# check that the zerebro_voxel.fbx file in the UI folder is downloaded, if not, download it
+if [ ! -f "ui/zerebro_voxel.fbx" ]; then
+    echo "Downloading avatar..."
+    curl -L "https://drive.usercontent.google.com/download?id=1vTske5Pn-PcAXZx6q3mZv9YzRzW4Gr_2&confirm=xxx" -o ui/zerebro_voxel.fbx
+fi
+echo "Avatar downloaded"
+
 echo "Installation successful!"
