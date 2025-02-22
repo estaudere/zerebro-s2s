@@ -19,24 +19,22 @@ create_window() {
 }
 
 # Create a new screen session named 'voicechat2' or attach to it if it already exists
-screen -dmS voicechat2
+# Create a new screen session named 'voicechat2'
+# screen -dmS voicechat2
 
 # FastAPI server (with Mamba activation)
-screen -S voicechat2 -X screen -t "voicechat2" ./bin/micromamba run -n vc uvicorn voicechat2:app --host localhost --port 8000 --reload
+screen -dmS voicechat2 ./bin/micromamba run -n vc uvicorn voicechat2:app --host localhost --port 8000 --reload
 
 # SRT server (HF transformers w/ distil-whisper)
-screen -S voicechat2 -X screen -t "srt" ./bin/micromamba run -n vc uvicorn srt-server:app --host 0.0.0.0 --port 8001 --reload
-
-# # LLM server (llama.cpp)
-# screen -S voicechat2 -X screen -t "llm" llama.cpp/llama-server --host 127.0.0.1 --port 8002 -m $LLM_MODEL -ngl 99 -c $LLM_CONTEXT
+screen -dmS sst ./bin/micromamba run -n vc uvicorn srt-server:app --host 0.0.0.0 --port 8001 --reload
 
 # TTS server (with Mamba activation)
-screen -S voicechat2 -X screen -t "tts" ./bin/micromamba run -n vc uvicorn tts-server:app --host 0.0.0.0 --port 8003
+screen -dmS tts ./bin/micromamba run -n vc uvicorn tts-server:app --host 0.0.0.0 --port 8003
 
 # Attach to the session
 echo "Voice chat system is now running in screen session 'voicechat2'."
 echo "To attach to the session, use: screen -r voicechat2"
 
-echo "Voice chat system is now running in tmux session 'voicechat2'."
-echo "To attach to the session, use: tmux attach -t voicechat2"
-echo "To detach from the session, use: Ctrl-b d"
+# echo "Voice chat system is now running in tmux session 'voicechat2'."
+# echo "To attach to the session, use: tmux attach -t voicechat2"
+# echo "To detach from the session, use: Ctrl-b d"
