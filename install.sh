@@ -16,12 +16,6 @@ fi
 ./bin/micromamba run -n vc pip install -r requirements.txt
 ./bin/micromamba -n vc install ffmpeg
 
-# test that ollama is running
-if ! ollama list; then
-    echo "Error: ollama is not running. Please ensure that ollama is started and try again."
-    exit 1
-fi
-
 # test that the LLM is downloaded
 if ! ollama list | grep -q "llama3.2:3b"; then
     echo "Error: llama3.2:3b is not downloaded. Please download it with 'ollama pull llama3.2:3b' and try again."

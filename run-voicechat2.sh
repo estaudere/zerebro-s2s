@@ -4,21 +4,12 @@
 LLM_MODEL=llama.cpp/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf 
 LLM_CONTEXT=8192 # if you use Llama 3.1 and don't specify this it'll OOM
 
-# Check if tmux is installed
-if ! command -v tmux &> /dev/null; then
-    echo "tmux is not installed. Please install it and try again."
+# check if ollama is running by accessing http://127.0.0.1:11434
+if ! curl -s http://127.0.0.1:11434 > /dev/null; then
+    echo "Error: ollama is not running. Please start ollama and try again."
     exit 1
 fi
 
-# Function to create a new window and run a command
-create_window() {
-    local window_name=$1
-    local command=$2
-    tmux new-window -n "$window_name"
-    tmux send-keys -t "voicechat2:$window_name" "$command" C-m
-}
-
-# Create a new screen session named 'voicechat2' or attach to it if it already exists
 # Create a new screen session named 'voicechat2'
 # screen -dmS voicechat2
 
